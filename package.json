@@ -1,0 +1,27 @@
+{
+  "name": "mesa-linkedin-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Telegram -> Gemini -> LinkedIn draft assistant for Meera. Drafts only; Meera approves and posts manually.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test:webhook": "node --import tsx scripts/test-webhook.mts",
+    "test:live": "node --env-file=.env --import tsx scripts/live-test.mts",
+    "check-note": "node --env-file=.env --import tsx scripts/check-note.mts",
+    "telegram:set-webhook": "node --env-file=.env scripts/set-webhook.mjs",
+    "telegram:webhook-info": "node --env-file=.env scripts/webhook-info.mjs",
+    "telegram:delete-webhook": "node --env-file=.env scripts/delete-webhook.mjs",
+    "telegram:find-chat-id": "node --env-file=.env scripts/find-chat-id.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@vercel/node": "^3.2.24",
+    "typescript": "^5.6.3",
+    "@types/node": "^20.14.15",
+    "tsx": "^4.19.2"
+  }
+}
