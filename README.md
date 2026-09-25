@@ -1,11 +1,14 @@
 # MESA Case 1 — Telegram → Gemini → LinkedIn draft assistant
 
-Meera sends a note to a Telegram bot. The bot sends it to Gemini, along
-with [`voice-skill.txt`](voice-skill.txt) (her writing-voice guide). Gemini
-scores the idea 0-5, decides whether it's ready to become a LinkedIn post,
-and if so drafts it in her voice. The result comes back to the same
-Telegram chat as a bracket-metadata card. Meera can reply to that card with
-a follow-up (a slash command or plain language) to keep iterating on it.
+Meera sends a note to a Telegram bot. Gemini identifies the topic and
+proposes a few Google News search queries; the bot runs those against
+Google News RSS; any genuinely relevant results are handed back to Gemini
+as optional context. Gemini then scores the idea 0-5, decides whether it's
+ready to become a LinkedIn post, and if so drafts it in her voice --
+optionally citing real, dated news sources. The result comes back to the
+same Telegram chat as a bracket-metadata card. Meera can reply to that
+card with a follow-up (a slash command or plain language) to keep
+iterating on it.
 
 **The bot never posts to LinkedIn and never auto-publishes anything.** It
 only ever sends text back into the Telegram chat. Meera copies, edits, and
@@ -20,10 +23,21 @@ Telegram message  ->  POST /api/telegram-webhook (Vercel)
                           |-- is this a reply to one of our own cards?
                           |     yes -> parse it back into (note, card) and
                           |            ask Gemini for a follow-up
-                          |     no  -> ask Gemini to score + draft the note
+                          |            (reuses the card's own cited sources,
+                          |             no fresh RSS fetch)
+                          |     no  -> Gemini: 2-4 news search queries
+                          |            -> Google News RSS (parallel, per query)
+                          |            -> merge/dedupe/rank, top ~8, last ~45 days
+                          |            -> Gemini: score + draft, optionally
+                          |               citing 1+ of those results by index
                           |
                        Telegram sendMessage back to the same chat
 ```
+
+News is optional context and never blocks the core flow: if query
+generation, the RSS fetch, or RSS parsing fails or comes back empty, the
+bot silently proceeds with no news (see `findRelevantNews` in
+`api/telegram-webhook.ts`).
 
 There is no database. "Memory" for follow-ups works by embedding the
 original note inside every card the bot sends (the `[SOURCE NOTE: ...]`
@@ -35,7 +49,8 @@ line) — replying to a card hands that text straight back to the webhook as
 |---|---|
 | `api/telegram-webhook.ts` | Vercel serverless function, the webhook Telegram calls |
 | `lib/telegram.ts` | Minimal Telegram Bot API client (sendMessage + webhook admin) |
-| `lib/gemini.ts` | Gemini calls: initial score + draft, and follow-up handling; structured JSON output; the numeric-claim backstop |
+| `lib/gemini.ts` | Gemini calls: news-query generation, initial score + draft, follow-up handling; structured JSON output; the numeric-claim backstop |
+| `lib/news.ts` | Google News RSS: fetch, parse (never throws), dedupe/rank/recency-filter, source-line formatting |
 | `lib/card.ts` | The bracket-metadata card format: render to text, and parse it back out of a replied-to message |
 | `lib/voice-skill.ts` | Reads `voice-skill.txt` at the project root |
 | `lib/config.ts` | Reads and validates required environment variables |
@@ -44,6 +59,7 @@ line) — replying to a card hands that text straight back to the webhook as
 | `scripts/webhook-info.mjs` | Shows current webhook status |
 | `scripts/delete-webhook.mjs` | Removes the webhook (needed before `find-chat-id`) |
 | `scripts/find-chat-id.mjs` | Reads pending updates to discover a chat's numeric id |
+| `scripts/test-news.mts` | Unit tests for RSS parsing/ranking, no network |
 | `scripts/test-webhook.mts` | Full webhook logic test, stubbed fetch, no network/spend |
 | `scripts/live-test.mts` | Real Gemini call against sample notes, no Telegram send |
 | `scripts/check-note.mts` | Ad-hoc real Gemini check for one note (+ optional follow-up), prints the rendered card |
@@ -61,6 +77,7 @@ A ready draft looks like:
 [EVIDENCE: ...]
 [WHY IT WORKS: ...]
 [WARNINGS: ... / None]
+[SOURCES: ... / None]
 
 Review before posting -- nothing is published automatically.
 
@@ -77,6 +94,30 @@ A note that isn't ready yet gets a shorter rejection card (`STATUS`,
 than rewriting the draft prepends an `[ANSWER: ...]` block before the
 (otherwise unchanged) card.
 
+## News
+
+For every new note, `lib/gemini.ts`'s `generateNewsQueries` asks Gemini to
+identify the note's specific topic and propose 2-4 focused Google News
+search queries (empty if the note is too thin to have a real topic).
+`api/telegram-webhook.ts` runs each query against
+`https://news.google.com/rss/search?q=...&hl=en-IN&gl=IN&ceid=IN:en` in
+parallel, and `lib/news.ts` parses, dedupes, drops anything older than 45
+days, and keeps the newest ~8.
+
+That numbered list is handed to Gemini as *optional* context alongside the
+note. Gemini may cite one or more by number in `news_used_indices` if --
+and only if -- it's genuinely relevant to the note's actual topic; the
+code then resolves those numbers against the real fetched items to build
+`[SOURCES: ...]` (one `"title" - source, date - url` per citation, always
+built from the real RSS data, never from model-generated text). If Gemini
+cites nothing (or nothing was found), `[NEWS ANGLE: None available]` and
+`[SOURCES: None]` -- the draft is evergreen instead, exactly as before
+this feature existed.
+
+The numeric-claim backstop (see below) treats the cited news items' text
+as known-good context too, so a real figure quoted from a genuinely cited
+article isn't mistaken for an invented one.
+
 ## Follow-ups
 
 Reply to any card (draft or rejection) with a slash command or plain
@@ -87,11 +128,19 @@ note/draft to use as context:
 `/takeaway` `/ending` `/personal` `/contrarian` `/check`
 
 or natural language like "give me better hooks", "why is this only a 3?",
-"make this more shareable", "what evidence is missing?". Gemini interprets
-plain language by the closest matching command's intent (see
-`FOLLOWUP_INSTRUCTIONS` in `lib/gemini.ts`). Sending a known command
-*without* replying to a card gets a nudge instead of being evaluated as a
-brand-new note.
+"make this more shareable", "what evidence is missing?", "use the news
+angle more", "remove the news angle". Gemini interprets plain language by
+the closest matching command's intent (see `FOLLOWUP_INSTRUCTIONS` in
+`lib/gemini.ts`). Sending a known command *without* replying to a card
+gets a nudge instead of being evaluated as a brand-new note.
+
+Follow-ups don't re-run the RSS search: they only have access to whichever
+sources the original card already cited (carried forward via
+`[SOURCES: ...]`), resolved the same index-based way. Asking "use the news
+angle more" leans on those same sources; asking for "another angle" that
+isn't about news falls back to an alternative *content* angle instead. A
+follow-up that wants a genuinely different news search isn't supported --
+reply with a fresh note instead.
 
 Whenever a follow-up actually rewrites the draft, the score is
 recalculated; question-style follow-ups (`/score`, `/hooks`, `/objections`,
@@ -138,8 +187,7 @@ cp .env.example .env   # then fill it in
 
 3. **Sanity-check locally, no network/spend:**
    ```bash
-   npm run typecheck
-   npm run test:webhook
+   npm test   # typecheck + test:news + test:webhook
    ```
 
 4. **Real Gemini check (reads `.env`, costs a little, sends nothing to

@@ -1,4 +1,5 @@
 import type { CardBase } from "./card.js";
+import { type NewsItem, formatSourceLine } from "./news.js";
 
 const VOICE_RULES = `Preserve these characteristics of the voice guide:
 - Calm, analytical, evidence-first tone.
@@ -27,11 +28,21 @@ doesn't state a concentration, percentage, or pH for a product, describe it
 without a fabricated number (e.g. "our niacinamide serum", not "our 5%
 niacinamide serum").
 
-You do NOT have live news or search access. Unless source context
-explicitly labelled as current/news is supplied to you, you have no
-reliable way to know what is currently happening. In that case: news_angle
-must be null, and you must not claim any topic is "currently" trending.
-Write the strongest evergreen version instead.`;
+You do NOT have live news or search access of your own. A numbered list of
+real Google News RSS search results may be supplied to you as optional
+context (see below) -- that list, if present, is the ONLY source of
+"current" information you have. If no such list is supplied, or none of
+its entries are genuinely relevant to the note's topic, news_angle must be
+null and news_used_indices must be empty. Never claim a topic is
+"currently" being discussed, trending, or in the news without citing one
+of the supplied numbered items by index. Any factual claim taken from the
+news (a figure, a date, an event, a quote) must be traceable to one of
+those RSS items -- never invented, never paraphrased into something more
+specific than the source actually says. When no relevant news exists,
+write the strongest evergreen version instead. The news, when used, is
+optional supporting context for Meera's own expertise -- it should never
+turn the post into news commentary or shift the argument away from her
+own observation.`;
 
 const VIRALITY_RULES = `A strong post should usually contain several of:
 1. A strong first line: a surprising observation, a counterintuitive claim,
@@ -49,10 +60,11 @@ const VIRALITY_RULES = `A strong post should usually contain several of:
 7. Genuine discussion potential when it fits naturally.
 
 Never use generic LinkedIn engagement bait, including but not limited to:
-"Here are 5 things...", "Nobody is talking about...", "This changed
-everything.", "Hot take:", "Unpopular opinion:", "Agree?", "Thoughts?",
-"Agree or disagree?", "Comment YES", "Comment below.", "Tag someone.",
-"10 lessons...". Never manufacture controversy, evidence, or certainty to
+"Here are 5 things...", "Here are 5 lessons...", "Nobody is talking
+about...", "Nobody is talking about this", "This changed everything.",
+"Hot take:", "Unpopular opinion:", "Agree?", "Thoughts?", "Agree or
+disagree?", "Comment YES", "Comment below.", "Tag someone.", "10
+lessons...". Never manufacture controversy, evidence, or certainty to
 increase reach. Never sacrifice factual accuracy or Meera's voice for
 engagement.`;
 
@@ -78,8 +90,8 @@ LinkedIn post text, never omitted, never null or empty. If status is
 NOT_READY, set angle, hook, news_angle, and draft to null, and instead
 fill in reason (why it's not ready yet), missing (specifically what
 evidence or detail is absent), and stronger_hint (one concrete thing that
-would raise the score). evidence_used and warnings must always be present
-as arrays (empty arrays are fine).`;
+would raise the score). evidence_used, warnings, and news_used_indices must
+always be present as arrays (empty arrays are fine).`;
 
 const INITIAL_INSTRUCTIONS = `You help Meera turn short founder notes into LinkedIn posts.
 
@@ -134,6 +146,17 @@ Do not stretch a weak idea to hit a word count; prefer a complete argument
 over filler. Target roughly 350-500 words when the subject genuinely
 supports that length.
 
+=== NEWS CONTEXT ===
+A numbered list of real Google News RSS search results for this note's
+topic may follow the note (see the user message). Only cite an item if it
+is genuinely relevant to the note's actual subject -- do not cite a
+tangentially-related or off-topic result just because it exists. If you
+use one or more, list their numbers (as given) in news_used_indices and
+summarise the connection in news_angle (one or two sentences, in Meera's
+voice, not a headline restatement). If none are genuinely relevant, or no
+list was supplied, news_used_indices must be [] and news_angle must be
+null.
+
 === OUTPUT ===
 This will be shown to Meera for manual review and approval only. She edits
 or discards it herself. Never imply the post has been or will be published
@@ -186,16 +209,31 @@ language expressing the same intent. Reserved commands:
   defensible point available in the note -- never manufactured
   controversy; recalculate the score.
 - /check: audit the current draft for anything not grounded in the note
-  or supplied context; report findings in the answer, and only fix the
-  draft (removing/rephrasing unsupported claims) if something is actually
-  wrong, recalculating the score if you do.
+  or supplied context (including any cited news item); report findings in
+  the answer, and only fix the draft (removing/rephrasing unsupported
+  claims) if something is actually wrong, recalculating the score if you
+  do.
 
 Plain-language follow-ups (e.g. "give me better hooks", "why is this only
 a 3?", "make this more shareable", "what would make this a 5?", "make the
 opening stronger", "what evidence is missing?", "is this too generic?",
 "what would someone disagree with?", "make this more founder-led", "audit
-this for factual errors") should be interpreted by the intent they
+this for factual errors", "use the news angle more", "remove the news
+angle", "give me another angle") should be interpreted by the intent they
 express, matching the closest reserved command's behaviour above.
+
+=== NEWS CONTEXT ON FOLLOW-UP ===
+You have no live news access during a follow-up. A numbered list of
+previously-cited news sources (already verified real, from the original
+pass) may be supplied below -- you may only reference those by number in
+news_used_indices; never invent a new one. If Meera asks to use the news
+angle more, weave the already-cited source(s) more centrally into the
+argument (still citing the same numbers). If she asks to remove the news
+angle, drop it: set news_used_indices to [] and news_angle to null, and
+make sure the draft reads as a complete, strong evergreen argument on its
+own. If she asks for "another angle" and it isn't about news specifically,
+treat it as a request for an alternative content angle instead (see
+/angle above).
 
 If the follow-up itself supplies new factual information (e.g. Meera adds
 a real number or detail in her message), treat that as explicitly
@@ -229,6 +267,7 @@ interface RawCard {
   angle?: string | null;
   hook?: string | null;
   news_angle?: string | null;
+  news_used_indices?: number[];
   evidence_used?: string[];
   why_it_works?: string | null;
   warnings?: string[];
@@ -245,6 +284,7 @@ const CARD_SCHEMA_PROPERTIES = {
   angle: { type: "STRING", nullable: true },
   hook: { type: "STRING", nullable: true },
   news_angle: { type: "STRING", nullable: true },
+  news_used_indices: { type: "ARRAY", items: { type: "INTEGER" } },
   evidence_used: { type: "ARRAY", items: { type: "STRING" } },
   why_it_works: { type: "STRING", nullable: true },
   warnings: { type: "ARRAY", items: { type: "STRING" } },
@@ -260,6 +300,7 @@ const CARD_REQUIRED = [
   "angle",
   "hook",
   "news_angle",
+  "news_used_indices",
   "evidence_used",
   "why_it_works",
   "warnings",
@@ -319,7 +360,8 @@ async function callGemini(
     (parsed.status !== "READY" && parsed.status !== "NOT_READY") ||
     typeof parsed.score !== "number" ||
     !Array.isArray(parsed.evidence_used) ||
-    !Array.isArray(parsed.warnings)
+    !Array.isArray(parsed.warnings) ||
+    !Array.isArray(parsed.news_used_indices)
   ) {
     throw new Error(`Gemini response missing required fields: ${text}`);
   }
@@ -330,18 +372,32 @@ async function callGemini(
   return parsed;
 }
 
-function toCardBase(parsed: RawCard): CardBase {
+/**
+ * candidates is the numbered list (1-indexed, matching what the prompt
+ * showed) that news_used_indices refers to -- either freshly-fetched RSS
+ * results (initial call) or previously-cited sources carried forward from
+ * the prior card (follow-up call). Sources are resolved by index against
+ * this known-real list rather than trusted from free text, so a cited
+ * source's title/date/url can never be fabricated or drift from the RSS
+ * result it came from. If no valid index was selected, news_angle is
+ * forced to undefined regardless of what the model put there.
+ */
+function toCardBase(parsed: RawCard, candidates: string[]): CardBase {
   const score = Math.max(0, Math.min(5, Math.round(parsed.score ?? 0)));
   if (parsed.status === "READY") {
+    const sources = Array.from(
+      new Set((parsed.news_used_indices ?? []).map((i) => candidates[i - 1]).filter((s): s is string => Boolean(s)))
+    );
     return {
       status: "READY",
       score,
       angle: parsed.angle?.trim() || "",
       hook: parsed.hook?.trim() || "",
-      newsAngle: parsed.news_angle?.trim() || undefined,
+      newsAngle: sources.length ? parsed.news_angle?.trim() || undefined : undefined,
       evidenceUsed: parsed.evidence_used ?? [],
       whyItWorks: parsed.why_it_works?.trim() || "",
       warnings: parsed.warnings ?? [],
+      sources,
       draft: parsed.draft?.trim() || "",
       answer: parsed.answer?.trim() || undefined,
     };
@@ -388,10 +444,30 @@ function withNumericBackstop(card: CardBase, knownContext: string): CardBase {
   return { ...card, warnings: [...card.warnings, ...extra] };
 }
 
-export async function decideAndDraft(apiKey: string, model: string, voiceSkill: string, note: string): Promise<CardBase> {
+export async function decideAndDraft(
+  apiKey: string,
+  model: string,
+  voiceSkill: string,
+  note: string,
+  newsItems: NewsItem[] = []
+): Promise<CardBase> {
   const systemInstruction = `${INITIAL_INSTRUCTIONS}\n\n--- Meera's voice/style guide ---\n${voiceSkill}`;
-  const raw = await callGemini(apiKey, model, systemInstruction, note, false);
-  return withNumericBackstop(toCardBase(raw), note);
+
+  const candidates = newsItems.map(formatSourceLine);
+  const newsBlock = candidates.length
+    ? [
+        "",
+        "--- Recent news search results (optional context; cite only if genuinely relevant to the note's topic) ---",
+        ...candidates.map((c, i) => `${i + 1}. ${c}`),
+      ].join("\n")
+    : "\n\n(No news search results were found for this note -- news_used_indices must be [] and news_angle must be null.)";
+  const userText = `${note}${newsBlock}`;
+
+  const newsBackstopText = newsItems.map((item) => `${item.title} ${item.description ?? ""}`).join("\n");
+  const knownContext = `${note}\n${newsBackstopText}`;
+
+  const raw = await callGemini(apiKey, model, systemInstruction, userText, false);
+  return withNumericBackstop(toCardBase(raw, candidates), knownContext);
 }
 
 export async function generateFollowUp(
@@ -403,6 +479,8 @@ export async function generateFollowUp(
   followUpText: string
 ): Promise<CardBase> {
   const systemInstruction = `${FOLLOWUP_INSTRUCTIONS}\n\n--- Meera's voice/style guide ---\n${voiceSkill}`;
+
+  const candidates = priorCard.status === "READY" ? priorCard.sources : [];
 
   const cardSummary =
     priorCard.status === "READY"
@@ -426,17 +504,93 @@ export async function generateFollowUp(
           `stronger_hint: ${priorCard.strongerHint}`,
         ].join("\n");
 
+  const newsBlock = candidates.length
+    ? [
+        "",
+        "--- Previously-cited news sources (already verified real; reference only by number, never invent a new one) ---",
+        ...candidates.map((c, i) => `${i + 1}. ${c}`),
+      ].join("\n")
+    : "\n\n(No news sources are attached to this card -- news_used_indices must be [] and news_angle must be null unless Meera supplies new source context herself.)";
+
   const userText = [
     "--- Original founder note ---",
     sourceNote,
     "",
     "--- Current card ---",
     cardSummary,
+    newsBlock,
     "",
     "--- Meera's follow-up ---",
     followUpText,
   ].join("\n");
 
   const raw = await callGemini(apiKey, model, systemInstruction, userText, true);
-  return withNumericBackstop(toCardBase(raw), `${sourceNote}\n${followUpText}`);
+  const newsBackstopText = candidates.join("\n");
+  return withNumericBackstop(toCardBase(raw, candidates), `${sourceNote}\n${followUpText}\n${newsBackstopText}`);
+}
+
+const NEWS_QUERY_INSTRUCTIONS = `You generate Google News search queries from a founder's short note.
+
+Read the note and identify its core, specific topic -- not generic
+industry chatter, but the actual subject (an ingredient, a market dynamic,
+a customer behaviour, a regulatory issue, a specific claim -- whatever the
+note is actually about).
+
+Propose 2-4 short, focused search queries (2-5 words each, keyword-style,
+like a search bar query, not a full sentence) that would surface
+genuinely relevant, recent news coverage of that specific topic. Do not
+pad the list with broad, generic, or unrelated queries just to reach 2 --
+a shorter list of genuinely on-topic queries is better than a longer list
+padded with filler.
+
+If the note is too thin or vague to identify any real topic, return an
+empty array rather than guessing at generic queries.
+
+Respond only in the given JSON schema.`;
+
+interface RawQueries {
+  queries?: string[];
+}
+
+/**
+ * Fails soft (returns []) rather than throwing: news is optional context,
+ * and a hiccup here must never break the core screening/scoring/drafting
+ * flow that already works without it.
+ */
+export async function generateNewsQueries(apiKey: string, model: string, note: string): Promise<string[]> {
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: NEWS_QUERY_INSTRUCTIONS }] },
+        contents: [{ role: "user", parts: [{ text: note }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: { queries: { type: "ARRAY", items: { type: "STRING" } } },
+            required: ["queries"],
+          },
+        },
+      }),
+    });
+    if (!res.ok) {
+      console.error(`Gemini news-query request failed: ${res.status}`);
+      return [];
+    }
+    const json = (await res.json()) as GeminiResponse;
+    const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return [];
+    const parsed: RawQueries = JSON.parse(text);
+    const queries = Array.isArray(parsed.queries) ? parsed.queries : [];
+    return queries
+      .map((q) => q.trim())
+      .filter(Boolean)
+      .slice(0, 4);
+  } catch (err) {
+    console.error("Failed to generate news search queries:", err);
+    return [];
+  }
 }

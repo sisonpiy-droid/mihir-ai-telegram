@@ -28,6 +28,7 @@ interface StubCard {
   angle?: string | null;
   hook?: string | null;
   news_angle?: string | null;
+  news_used_indices?: number[];
   evidence_used: string[];
   why_it_works?: string | null;
   warnings: string[];
@@ -53,16 +54,47 @@ let geminiReply: StubCard = {
   stronger_hint: null,
 };
 
+// Controls the news-query-generation Gemini call (separate from the main
+// card call above, distinguished by its systemInstruction text).
+let geminiQueriesReply: string[] = [];
+
+// Controls what the Google News RSS endpoint returns. Most tests don't
+// care about news at all, so the default is an empty (but valid) feed --
+// combined with geminiQueriesReply defaulting to [], most tests never even
+// reach the RSS fetch (findRelevantNews short-circuits on no queries).
+let newsRssXml = `<?xml version="1.0"?><rss version="2.0"><channel><title>Test</title></channel></rss>`;
+let newsFetchCount = 0;
+
+function newsItemXml(opts: { title: string; source: string; pubDate: string; link: string; description?: string }): string {
+  return `<item><title>${opts.title} - ${opts.source}</title><link>${opts.link}</link><pubDate>${opts.pubDate}</pubDate>${
+    opts.description ? `<description>${opts.description}</description>` : ""
+  }<source url="https://example.com">${opts.source}</source></item>`;
+}
+
+function rssFeedWith(...items: string[]): string {
+  return `<?xml version="1.0"?><rss version="2.0"><channel><title>Test</title>${items.join("")}</channel></rss>`;
+}
+
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
   const url = String(input);
   if (url.includes("generativelanguage.googleapis.com")) {
-    return new Response(
-      JSON.stringify({
-        candidates: [{ content: { parts: [{ text: JSON.stringify(geminiReply) }] } }],
-      }),
-      { status: 200 }
-    );
+    const body = JSON.parse(init?.body ?? "{}");
+    const systemText = body?.systemInstruction?.parts?.[0]?.text ?? "";
+    if (systemText.includes("Google News search queries")) {
+      return new Response(
+        JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ queries: geminiQueriesReply }) }] } }] }),
+        { status: 200 }
+      );
+    }
+    const withDefaults = { news_used_indices: [], ...geminiReply };
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(withDefaults) }] } }] }), {
+      status: 200,
+    });
+  }
+  if (url.includes("news.google.com")) {
+    newsFetchCount++;
+    return new Response(newsRssXml, { status: 200 });
   }
   if (url.includes("api.telegram.org")) {
     const body = JSON.parse(init?.body ?? "{}");
@@ -339,6 +371,255 @@ let readyCardText = "";
   const text = sentMessages[0]?.text ?? "";
   assert(text.includes("Fresh draft from what looked like a reply."), "reply to non-card -> treated as new note");
   assert(text.includes("[SOURCE NOTE: A brand new substantial note.]"), "reply to non-card -> source note is the new message, not the old one");
+}
+
+// 12. Relevant news: queries generated, RSS returns a real item, Gemini
+// cites it by index -> NEWS ANGLE and SOURCES populated from real RSS data.
+let readyWithNewsCardText = "";
+{
+  sentMessages.length = 0;
+  newsFetchCount = 0;
+  geminiQueriesReply = ["skincare formulation India"];
+  newsRssXml = rssFeedWith(
+    newsItemXml({
+      title: "Skincare brands rethink formulas for humidity",
+      source: "Economic Times",
+      pubDate: "Wed, 24 Sep 2026 10:00:00 GMT",
+      link: "https://example.com/humidity-story",
+      description: "Indian skincare brands report a 23% rise in humidity-related complaints.",
+    })
+  );
+  geminiReply = {
+    status: "READY",
+    score: 4,
+    angle: "Climate-driven formulation",
+    hook: "A hook informed by real news.",
+    news_angle: "A recent Economic Times piece confirms this is an industry-wide pattern, not a one-off.",
+    news_used_indices: [1],
+    evidence_used: ["Customer complaint pattern from the note"],
+    why_it_works: "Ties a founder observation to an external, verifiable trend.",
+    warnings: [],
+    draft: "Draft body citing the humidity trend.",
+    reason: null,
+    missing: null,
+    stronger_hint: null,
+  };
+  const req = makeReq({ body: { update_id: 11, message: msg(11, "Customers in humid cities dislike our heavier serum texture.") } });
+  const res = makeRes();
+  await handler(req, res);
+  readyWithNewsCardText = sentMessages[0]?.text ?? "";
+  assert(newsFetchCount === 1, "relevant news -> RSS was actually fetched");
+  assert(readyWithNewsCardText.includes("A recent Economic Times piece"), "relevant news -> NEWS ANGLE populated");
+  assert(
+    readyWithNewsCardText.includes(
+      '[SOURCES: "Skincare brands rethink formulas for humidity - Economic Times" - Economic Times, 24 Sep 2026 - https://example.com/humidity-story]'
+    ),
+    "relevant news -> SOURCES built from real RSS data (title/source/date/url)"
+  );
+}
+
+// 13. Irrelevant news: RSS returns items, but Gemini doesn't cite any of
+// them -> None available, no fabricated news angle.
+{
+  sentMessages.length = 0;
+  newsFetchCount = 0;
+  geminiQueriesReply = ["skincare formulation India"];
+  newsRssXml = rssFeedWith(
+    newsItemXml({
+      title: "Unrelated cricket match report",
+      source: "Some Sports Site",
+      pubDate: "Wed, 24 Sep 2026 10:00:00 GMT",
+      link: "https://example.com/cricket",
+    })
+  );
+  geminiReply = {
+    status: "READY",
+    score: 3,
+    angle: "a",
+    hook: "h",
+    news_angle: null,
+    news_used_indices: [],
+    evidence_used: [],
+    why_it_works: "w",
+    warnings: [],
+    draft: "Evergreen draft, no news tie-in.",
+    reason: null,
+    missing: null,
+    stronger_hint: null,
+  };
+  const req = makeReq({ body: { update_id: 12, message: msg(12, "Another substantial founder note.") } });
+  const res = makeRes();
+  await handler(req, res);
+  const text = sentMessages[0]?.text ?? "";
+  assert(text.includes("[NEWS ANGLE: None available]"), "irrelevant news -> None available");
+  assert(text.includes("[SOURCES: None]"), "irrelevant news -> no sources cited");
+}
+
+// 14. No news available: query generation itself returns no queries, so
+// the RSS endpoint is never even called.
+{
+  sentMessages.length = 0;
+  newsFetchCount = 0;
+  geminiQueriesReply = [];
+  geminiReply = {
+    status: "READY",
+    score: 3,
+    angle: "a",
+    hook: "h",
+    news_angle: null,
+    news_used_indices: [],
+    evidence_used: [],
+    why_it_works: "w",
+    warnings: [],
+    draft: "Evergreen draft.",
+    reason: null,
+    missing: null,
+    stronger_hint: null,
+  };
+  const req = makeReq({ body: { update_id: 13, message: msg(13, "A note with no clear news-worthy topic.") } });
+  const res = makeRes();
+  await handler(req, res);
+  const text = sentMessages[0]?.text ?? "";
+  assert(newsFetchCount === 0, "no news queries generated -> RSS endpoint never called");
+  assert(text.includes("[NEWS ANGLE: None available]"), "no news available -> None available");
+}
+
+// 15. Malformed RSS degrades gracefully: the webhook still completes
+// normally instead of erroring out.
+{
+  sentMessages.length = 0;
+  geminiQueriesReply = ["some query"];
+  newsRssXml = "this is not valid xml at all {{{";
+  geminiReply = {
+    status: "READY",
+    score: 3,
+    angle: "a",
+    hook: "h",
+    news_angle: null,
+    news_used_indices: [],
+    evidence_used: [],
+    why_it_works: "w",
+    warnings: [],
+    draft: "Draft body, unaffected by the broken feed.",
+    reason: null,
+    missing: null,
+    stronger_hint: null,
+  };
+  const req = makeReq({ body: { update_id: 14, message: msg(14, "Another note entirely.") } });
+  const res = makeRes();
+  await handler(req, res);
+  const text = sentMessages[0]?.text ?? "";
+  assert(res.statusCode === 200, "malformed RSS -> webhook still returns 200");
+  assert(text.includes("Draft body, unaffected by the broken feed."), "malformed RSS -> core flow completes normally");
+  assert(text.includes("[NEWS ANGLE: None available]"), "malformed RSS -> treated as no news found");
+}
+
+// 16. A news-derived factual claim (a number that appears in the cited
+// news item's description, not in the note) is NOT flagged by the
+// numeric-claim backstop.
+{
+  sentMessages.length = 0;
+  geminiQueriesReply = ["skincare formulation India"];
+  newsRssXml = rssFeedWith(
+    newsItemXml({
+      title: "Industry report on humidity complaints",
+      source: "Trade Press",
+      pubDate: "Wed, 24 Sep 2026 10:00:00 GMT",
+      link: "https://example.com/report",
+      description: "The report cites a 23% increase in complaints.",
+    })
+  );
+  geminiReply = {
+    status: "READY",
+    score: 4,
+    angle: "a",
+    hook: "h",
+    news_angle: "An industry report confirms the same pattern.",
+    news_used_indices: [1],
+    evidence_used: [],
+    why_it_works: "w",
+    warnings: [],
+    draft: "As a trade report notes, complaints of this kind rose 23% this year.",
+    reason: null,
+    missing: null,
+    stronger_hint: null,
+  };
+  const req = makeReq({ body: { update_id: 15, message: msg(15, "A note about texture complaints, no numbers of its own.") } });
+  const res = makeRes();
+  await handler(req, res);
+  const text = sentMessages[0]?.text ?? "";
+  assert(!/23%.*doesn't appear/.test(text), "number sourced from cited news item -> not flagged as unsupported");
+}
+
+// 17. A number that appears in NEITHER the note NOR any cited news item is
+// still flagged, even with news present in the request.
+{
+  sentMessages.length = 0;
+  geminiQueriesReply = ["skincare formulation India"];
+  newsRssXml = rssFeedWith(
+    newsItemXml({
+      title: "Industry report on humidity complaints",
+      source: "Trade Press",
+      pubDate: "Wed, 24 Sep 2026 10:00:00 GMT",
+      link: "https://example.com/report",
+      description: "General commentary, no figures given.",
+    })
+  );
+  geminiReply = {
+    status: "READY",
+    score: 4,
+    angle: "a",
+    hook: "h",
+    news_angle: "An industry report confirms the same pattern.",
+    news_used_indices: [1],
+    evidence_used: [],
+    why_it_works: "w",
+    warnings: [],
+    draft: "Complaints of this kind rose 99% this year, an invented figure.",
+    reason: null,
+    missing: null,
+    stronger_hint: null,
+  };
+  const req = makeReq({ body: { update_id: 16, message: msg(16, "A note about texture complaints, no numbers of its own.") } });
+  const res = makeRes();
+  await handler(req, res);
+  const text = sentMessages[0]?.text ?? "";
+  assert(/99%.*doesn't appear in your original note/.test(text), "number in neither note nor cited news -> still flagged");
+}
+
+// 18. Follow-ups carry sources forward correctly: replying to a card that
+// already has a SOURCES bracket, the follow-up's news_used_indices are
+// resolved against THOSE prior sources (not a fresh RSS fetch).
+{
+  sentMessages.length = 0;
+  newsFetchCount = 0;
+  geminiReply = {
+    status: "READY",
+    score: 5,
+    angle: "Climate-driven formulation",
+    hook: "An even sharper hook, still citing the same news.",
+    news_angle: "Still tied to the same Economic Times piece.",
+    news_used_indices: [1],
+    evidence_used: ["Customer complaint pattern from the note"],
+    why_it_works: "Now sharper.",
+    warnings: [],
+    draft: "A rewritten draft that still cites the humidity trend.",
+    reason: null,
+    missing: null,
+    stronger_hint: null,
+    answer: null,
+  };
+  const req = makeReq({ body: { update_id: 17, message: msg(17, "/stronger", { text: readyWithNewsCardText }) } });
+  const res = makeRes();
+  await handler(req, res);
+  const text = sentMessages[0]?.text ?? "";
+  assert(newsFetchCount === 0, "follow-up news citation -> no fresh RSS fetch, reuses the prior card's sources");
+  assert(
+    text.includes(
+      '[SOURCES: "Skincare brands rethink formulas for humidity - Economic Times" - Economic Times, 24 Sep 2026 - https://example.com/humidity-story]'
+    ),
+    "follow-up -> prior source carried forward exactly, resolved by index against the prior list"
+  );
 }
 
 globalThis.fetch = realFetch;

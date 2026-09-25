@@ -12,6 +12,8 @@ export interface ReadyCardBase {
   evidenceUsed: string[];
   whyItWorks: string;
   warnings: string[];
+  /** Pre-formatted "title - source, date - url" lines for news actually cited. */
+  sources: string[];
   draft: string;
   answer?: string;
 }
@@ -52,6 +54,7 @@ export function renderCard(card: Card): string {
     parts.push(bracket("EVIDENCE", card.evidenceUsed.length ? card.evidenceUsed.join("; ") : "None"));
     parts.push(bracket("WHY IT WORKS", card.whyItWorks));
     parts.push(bracket("WARNINGS", card.warnings.length ? card.warnings.join("; ") : "None"));
+    parts.push(bracket("SOURCES", card.sources.length ? card.sources.join("; ") : "None"));
     parts.push("");
     parts.push("Review before posting -- nothing is published automatically.");
     parts.push("");
@@ -73,7 +76,7 @@ export function renderCard(card: Card): string {
 }
 
 const FIELD_RE =
-  /^\[(STATUS|SCORE|ANGLE|HOOK|NEWS ANGLE|EVIDENCE|WHY IT WORKS|WARNINGS|REASON|MISSING|WHAT WOULD MAKE IT STRONGER):\s*(.*)\]$/gm;
+  /^\[(STATUS|SCORE|ANGLE|HOOK|NEWS ANGLE|EVIDENCE|WHY IT WORKS|WARNINGS|SOURCES|REASON|MISSING|WHAT WOULD MAKE IT STRONGER):\s*(.*)\]$/gm;
 
 /**
  * Recovers a Card from a previously-rendered message (e.g. the text of a
@@ -116,6 +119,7 @@ export function parseCard(text: string): Card | null {
       evidenceUsed: splitList(fields.EVIDENCE),
       whyItWorks: fields["WHY IT WORKS"] ?? "",
       warnings: splitList(fields.WARNINGS),
+      sources: splitList(fields.SOURCES),
       draft,
       sourceNote,
     };

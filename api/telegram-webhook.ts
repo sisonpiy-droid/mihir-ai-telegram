@@ -1,9 +1,10 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getConfig } from "../lib/config.js";
 import { getVoiceSkill } from "../lib/voice-skill.js";
-import { decideAndDraft, generateFollowUp } from "../lib/gemini.js";
+import { decideAndDraft, generateFollowUp, generateNewsQueries } from "../lib/gemini.js";
 import { TelegramClient, type TelegramUpdate } from "../lib/telegram.js";
 import { renderCard, parseCard } from "../lib/card.js";
+import { searchGoogleNews, mergeAndRankNews, type NewsItem } from "../lib/news.js";
 
 const KNOWN_COMMANDS = [
   "/score",
@@ -97,7 +98,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const updated = await generateFollowUp(config.geminiApiKey, config.geminiModel, voiceSkill, priorCard, priorCard.sourceNote, text);
       await telegram.sendMessage(chatId, renderCard({ ...updated, sourceNote: priorCard.sourceNote }));
     } else {
-      const card = await decideAndDraft(config.geminiApiKey, config.geminiModel, voiceSkill, text);
+      const newsItems = await findRelevantNews(config.geminiApiKey, config.geminiModel, text);
+      const card = await decideAndDraft(config.geminiApiKey, config.geminiModel, voiceSkill, text, newsItems);
       await telegram.sendMessage(chatId, renderCard({ ...card, sourceNote: text }));
     }
   } catch (err) {
@@ -113,5 +115,23 @@ async function safeSend(telegram: TelegramClient, chatId: number, text: string):
     await telegram.sendMessage(chatId, text);
   } catch (err) {
     console.error("Failed to notify chat about an earlier error:", err);
+  }
+}
+
+/**
+ * News is optional context, not a required step -- any failure here (a
+ * Gemini hiccup, Google News being unreachable, malformed RSS) degrades to
+ * "no news found" rather than failing the whole request. The core
+ * screening/scoring/drafting flow must keep working with or without it.
+ */
+async function findRelevantNews(apiKey: string, model: string, note: string): Promise<NewsItem[]> {
+  try {
+    const queries = await generateNewsQueries(apiKey, model, note);
+    if (!queries.length) return [];
+    const resultsByQuery = await Promise.all(queries.map((q) => searchGoogleNews(q)));
+    return mergeAndRankNews(resultsByQuery);
+  } catch (err) {
+    console.error("News search failed, continuing without it:", err);
+    return [];
   }
 }

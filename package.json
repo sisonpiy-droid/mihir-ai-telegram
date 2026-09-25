@@ -9,7 +9,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test:news": "node --import tsx scripts/test-news.mts",
     "test:webhook": "node --import tsx scripts/test-webhook.mts",
+    "test": "npm run typecheck && npm run test:news && npm run test:webhook",
     "test:live": "node --env-file=.env --import tsx scripts/live-test.mts",
     "check-note": "node --env-file=.env --import tsx scripts/check-note.mts",
     "telegram:set-webhook": "node --env-file=.env scripts/set-webhook.mjs",
@@ -17,11 +19,13 @@
     "telegram:delete-webhook": "node --env-file=.env scripts/delete-webhook.mjs",
     "telegram:find-chat-id": "node --env-file=.env scripts/find-chat-id.mjs"
   },
-  "dependencies": {},
+  "dependencies": {
+    "fast-xml-parser": "^4.5.7"
+  },
   "devDependencies": {
-    "@vercel/node": "^3.2.24",
-    "typescript": "^5.6.3",
     "@types/node": "^20.14.15",
-    "tsx": "^4.19.2"
+    "@vercel/node": "^3.2.24",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
   }
 }
