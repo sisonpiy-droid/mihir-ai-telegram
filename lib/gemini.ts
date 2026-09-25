@@ -68,6 +68,38 @@ lessons...". Never manufacture controversy, evidence, or certainty to
 increase reach. Never sacrifice factual accuracy or Meera's voice for
 engagement.`;
 
+const LENGTH_RULES = `Target 350-500 words for the draft when the subject genuinely supports
+it -- consistent with the voice guide's own newsletter/post length. This
+is not a box to fill with padding: if there genuinely isn't enough real
+evidence or substance to responsibly reach 350 words, write a shorter,
+complete post instead. Never invent facts, statistics, scientific claims,
+examples, or numbers just to add length.
+
+A short first draft is a signal to develop the argument further, not to
+pad it. Before finishing, check the word count. If it's under 350 and the
+idea has more to it, genuinely develop one or more of the following
+(each one is a source of real content, not filler):
+- deeper explanation of the underlying mechanism -- why it happens, with
+  the actual causal steps, not just that it happens
+- stronger development of the founder's own observation -- the specific
+  moment, decision, or realisation behind it, argued out rather than
+  stated once
+- more of the evidence already available in the note -- a number the
+  note gives often has more than one implication worth spelling out
+- one meaningful caveat or limitation, developed as a real point (what
+  it doesn't prove, and why that matters) rather than mentioned in
+  passing
+- genuinely relevant current context/news, if any was supplied and cited
+- a more useful, more specific practical implication for the reader
+- a stronger, more concrete concluding thought
+
+The result should read as a complete argument the reader has to slow
+down for -- claim, mechanism, evidence, caveat, implication, all
+properly developed -- not a short social-media summary padded to hit a
+number. Keep the metadata fields (evidence_used, warnings, etc.) entirely
+separate from the draft text itself; none of this expansion belongs
+outside the draft field.`;
+
 const SCORE_RUBRIC = `Score the content opportunity from 0 to 5, based on: hook strength,
 novelty, specificity, evidence/credibility, practical value, shareability,
 and founder authenticity.
@@ -134,17 +166,18 @@ ${VIRALITY_RULES}
 === STRUCTURE (when status is READY) ===
 HOOK: 1-2 lines, strong and specific.
 SETUP: the common assumption or problem.
-MECHANISM: what's actually happening and why.
-EVIDENCE: the strongest available concrete evidence (only real evidence).
-CAVEAT: what the evidence does not prove.
-IMPLICATION: why the reader should care.
+MECHANISM: what's actually happening and why -- this is usually where a
+short draft is under-developed; explain the actual causal steps.
+EVIDENCE: the strongest available concrete evidence (only real evidence),
+with its implication spelled out, not just stated.
+CAVEAT: what the evidence does not prove -- develop this as a real point.
+IMPLICATION: why the reader should care, specifically.
 PRACTICAL TAKEAWAY: one specific thing to do, ask, check, or reconsider.
 ENDING: a memorable, concrete closing thought. A question only if it
 genuinely advances the discussion, never as bait.
 
-Do not stretch a weak idea to hit a word count; prefer a complete argument
-over filler. Target roughly 350-500 words when the subject genuinely
-supports that length.
+=== LENGTH ===
+${LENGTH_RULES}
 
 === NEWS CONTEXT ===
 A numbered list of real Google News RSS search results for this note's
@@ -182,6 +215,10 @@ changed.
 
 ${VIRALITY_RULES}
 
+${LENGTH_RULES} These length rules apply to any rewrite below just as much
+as to a first draft -- a rewrite that gets shorter without being asked to,
+or that stays short by restating rather than developing, is a regression.
+
 Meera's follow-up may be a slash command with a reserved meaning, or plain
 language expressing the same intent. Reserved commands:
 - /score: explain the current score -- what's holding it back, what would
@@ -193,9 +230,12 @@ language expressing the same intent. Reserved commands:
 - /stronger: rewrite the draft to be stronger overall (sharper argument,
   better hook, more tension); recalculate the score.
 - /shorter: rewrite the draft to be meaningfully shorter while keeping the
-  core argument intact; recalculate the score.
-- /expand: rewrite the draft with more depth, still grounded only in
-  available evidence; recalculate the score.
+  core argument intact; recalculate the score. (The only command that
+  should deliberately shrink it.)
+- /expand: rewrite with real depth using the same expansion levers as
+  above (mechanism, evidence implications, a developed caveat, a sharper
+  practical implication, etc.) -- still grounded only in available
+  evidence, never padded with invented material; recalculate the score.
 - /objections: list the strongest objections/counterarguments a reader
   might raise, as the answer. Don't rewrite the draft unless asked to.
 - /takeaway: rewrite just the practical-takeaway portion to be sharper;
